@@ -691,8 +691,15 @@ class Trial(object):
 
     @fluent
     def with_closure(self, closure):
+        import types
         self._closure_checker(closure)
-        self.closure = closure
+        try:
+            self.closure = types.MethodType(closure, self)
+        except TypeError:
+            # too many arguments to MethodType, we must be in Python3
+            self.closure = types.MethodType(closure, self, type(self))
+        except Exception:
+            warnings.warn('Failed to bind closure')
 
     def _closure_checker(self, closure):  # TODO: Better closure check
         if closure is None:
@@ -800,7 +807,7 @@ class Trial(object):
             state[torchbearer.SAMPLER].sample(state)
             state[torchbearer.CALLBACK_LIST].on_sample(state)
 
-            self.closure(state)
+            closure = self.closure(state)
 
             # Update parameters
             state[torchbearer.OPTIMIZER].step(closure)
