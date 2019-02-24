@@ -116,9 +116,7 @@ transform = transforms.Compose([
                         transforms.ToTensor(),
                         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
                    ])
-
 dataset = datasets.MNIST('./data/mnist', train=True, download=True, transform=transform)
-
 dataloader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True, drop_last=True)
 
 
@@ -148,60 +146,45 @@ class d_loss(tb.metrics.Metric):
     def process(self, state):
         return state[D_LOSS]
 
-def closure_gen(self, state):
-    # Zero grads
-    state[tb.OPTIMIZER].zero_grad()
 
-    # Forward Pass
-    if self.pass_state:
-        state[tb.Y_PRED] = state[tb.MODEL](state[tb.X], state=state)
-    else:
-        state[tb.Y_PRED] = state[tb.MODEL](state[tb.X])
+def base_closure(X, Model, Y_pred, Crit, Loss, Opt):
+    def closure(self, state):
+        # Zero grads
+        state[Opt].zero_grad()
 
-    state[tb.CALLBACK_LIST].on_forward(state)
+        # Forward Pass
+        if self.pass_state:
+            state[Y_pred] = state[Model](state[X], state=state)
+        else:
+            state[Y_pred] = state[Model](state[X])
 
-    # Loss Calculation
-    state[tb.LOSS] = state[tb.CRITERION](state)
+        state[tb.CALLBACK_LIST].on_forward(state)
 
-    state[tb.CALLBACK_LIST].on_criterion(state)
+        # Loss Calculation
+        state[Loss] = state[Crit](state)
 
-    # Backwards pass
-    state[tb.LOSS].backward(**state[tb.BACKWARD_ARGS])
+        state[tb.CALLBACK_LIST].on_criterion(state)
 
-    state[tb.CALLBACK_LIST].on_backward(state)
+        # Backwards pass
+        state[Loss].backward(**state[tb.BACKWARD_ARGS])
 
-def closure_disc(self, state):
-    # Zero grads
-    state[DISC_OPT].zero_grad()
+        state[tb.CALLBACK_LIST].on_backward(state)
+    return closure
 
-    # Forward Pass
-    if self.pass_state:
-        state[DISC_IMGS] = state[DISC_MODEL](state[tb.Y_PRED], state=state)
-    else:
-        state[DISC_IMGS] = state[DISC_MODEL](state[tb.Y_PRED])
 
-    state[tb.CALLBACK_LIST].on_forward(state)
-
-    # Loss Calculation
-    state[tb.LOSS] = state[DISC_CRIT](state)
-
-    state[tb.CALLBACK_LIST].on_criterion(state)
-
-    # Backwards pass
-    state[tb.LOSS].backward(**state[tb.BACKWARD_ARGS])
-
-    state[tb.CALLBACK_LIST].on_backward(state)
-    state[DISC_OPT].step()
+closure_gen = base_closure(tb.X, tb.MODEL, tb.Y_PRED, tb.CRITERION, tb.LOSS, tb.OPTIMIZER)
+closure_disc = base_closure(tb.Y_PRED, DISC_MODEL, DISC_IMGS, DISC_CRIT, tb.LOSS, DISC_OPT)
 
 def closure(self, state):
     closure_gen(self, state)
     closure_disc(self, state)
+    state[DISC_OPT].step()
 
 
 trial = tb.Trial(generator, optimizer_G, criterion=gen_crit, metrics=['loss', g_loss(), d_loss()],
                             callbacks=[saver_callback], pass_state=True)
 trial.with_train_generator(dataloader)
-trial.state[DISC_MODEL] = discriminator.cuda()
+trial.state[DISC_MODEL] = discriminator.to(device)
 trial.state[DISC_OPT] = optimizer_D
 trial.state[DISC_CRIT] = disc_crit
 trial.with_closure(closure)
